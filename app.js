@@ -153,6 +153,14 @@
     });
   }
 
+  function createTextSpan(todo) {
+    var text = document.createElement('span');
+    text.className = 'item__text';
+    text.textContent = todo.text;
+    text.title = '双击编辑';
+    return text;
+  }
+
   function createRow(todo) {
     var li = document.createElement('li');
     li.className = 'item' + (todo.done ? ' is-done' : '');
@@ -165,10 +173,7 @@
     box.checked = todo.done;
     box.setAttribute('aria-label', '标记完成：' + todo.text);
 
-    var text = document.createElement('span');
-    text.className = 'item__text';
-    text.textContent = todo.text;
-    text.title = '双击编辑';
+    var text = createTextSpan(todo);
 
     var del = document.createElement('button');
     del.type = 'button';
@@ -236,19 +241,59 @@
     editor.select();
 
     var settled = false;
+    var composing = false;
+    var compositionJustEnded = false;
+
+    editor.addEventListener('compositionstart', function () {
+      composing = true;
+    });
+
+    editor.addEventListener('compositionend', function () {
+      composing = false;
+      // 部分浏览器（如 Safari）会在 compositionend 之后同一按键序列里补发一次
+      // Enter 的 keydown，用一次性标记把这次 Enter 也忽略掉，
+      // 确保「确认候选词」不会误触发编辑提交。
+      compositionJustEnded = true;
+      window.setTimeout(function () {
+        compositionJustEnded = false;
+      }, 0);
+    });
+
+    /**
+     * 结束编辑。
+     * 只就地替换当前编辑框，不调用 render() 重建整张列表：
+     * blur 通常由用户点击其他条目（比如删除按钮）产生，若在 blur 里重建列表，
+     * 被点击的按钮会先从 DOM 移除，导致这一次点击落空（要点两次才生效）。
+     */
     function finish(cancel) {
       if (settled) return;
       settled = true;
       editingId = null;
-      if (!cancel) updateText(id, editor.value);
-      render();
+
+      var value = String(editor.value || '').trim();
+      if (!cancel && value) updateText(id, value);
+
+      var current = findTodo(id);
+      if (current && editor.parentNode) {
+        editor.parentNode.replaceChild(createTextSpan(current), editor);
+      } else {
+        render();
+      }
     }
 
     editor.addEventListener('keydown', function (event) {
-      if (event.key === 'Enter') {
+      var key = event.key;
+      if (key !== 'Enter' && key !== 'Escape') return;
+
+      // 输入法组合（含候选词选择）期间的 Enter / Escape 交给输入法处理，
+      // 既不结束编辑，也不阻止默认行为，避免打断候选词上屏。
+      if (composing || event.isComposing || event.keyCode === 229) return;
+
+      if (key === 'Enter') {
         event.preventDefault();
+        if (compositionJustEnded) return;
         finish(false);
-      } else if (event.key === 'Escape') {
+      } else {
         event.preventDefault();
         finish(true);
       }

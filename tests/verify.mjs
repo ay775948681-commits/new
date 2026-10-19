@@ -286,6 +286,64 @@ async function main() {
     const stored = () => evaluate(`JSON.parse(localStorage.getItem('todo-app.items.v1') || '[]')`);
     const summaryText = () => evaluate(`document.getElementById('summary').textContent`);
 
+    /** 双击第 index 条的文字，进入行内编辑 */
+    async function dblclickTextAt(index) {
+      await evaluate(`(() => {
+        const el = document.querySelectorAll('.item__text')[${index}];
+        el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      })()`);
+      await sleep(100);
+    }
+
+    /** 用真实鼠标事件点击坐标点（会产生真实 blur / focus 流转） */
+    async function mouseClickAt(selector, index) {
+      const point = await evaluate(`(() => {
+        const el = document.querySelectorAll(${JSON.stringify(selector)})[${index}];
+        el.scrollIntoView({ block: 'center' });
+        const r = el.getBoundingClientRect();
+        return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+      })()`);
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y, button: 'none' }, sessionId);
+      await cdp.send(
+        'Input.dispatchMouseEvent',
+        { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 },
+        sessionId
+      );
+      await cdp.send(
+        'Input.dispatchMouseEvent',
+        { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 },
+        sessionId
+      );
+      await sleep(120);
+    }
+
+    /** 在编辑框上派发键盘事件；isComposing 用于模拟输入法组合期间的按键 */
+    async function pressInEditor(key, isComposing) {
+      return evaluate(`(() => {
+        const editor = document.querySelector('.item__edit');
+        if (!editor) return { dispatched: false, isComposing: false };
+        const event = new KeyboardEvent('keydown', {
+          key: ${JSON.stringify(key)},
+          bubbles: true,
+          cancelable: true,
+          isComposing: ${Boolean(isComposing)}
+        });
+        editor.dispatchEvent(event);
+        return { dispatched: true, isComposing: event.isComposing === true };
+      })()`);
+    }
+
+    async function setEditorValue(value) {
+      await evaluate(`(() => {
+        const editor = document.querySelector('.item__edit');
+        editor.value = ${JSON.stringify(value)};
+        editor.dispatchEvent(new Event('input', { bubbles: true }));
+      })()`);
+      await sleep(40);
+    }
+
+    const isEditorOpen = () => evaluate(`Boolean(document.querySelector('.item__edit'))`);
+
     /* ---------- T1 初始状态 ---------- */
     await goto(baseUrl);
     const emptyInitial = await evaluate(`({
@@ -489,6 +547,87 @@ async function main() {
         finalState.summary === '共 0 项 · 已完成 0 项' &&
         finalState.stored === '[]',
       `行数 ${finalState.rows}，空态「${finalState.emptyText}」，存储 ${finalState.stored}`
+    );
+
+    /* ---------- T13 编辑中点击其他条目删除按钮（回归：首次点击失效） ---------- */
+    await addByClick('甲');
+    await addByClick('乙');
+    await addByClick('丙');
+    await dblclickTextAt(0);
+    await setEditorValue('甲（改）');
+    const editingBeforeClick = await isEditorOpen();
+    // 真实鼠标点击「乙」的删除按钮：mousedown 会先让编辑框 blur
+    await mouseClickAt('.item__delete', 1);
+    const afterDeleteWhileEditing = await texts();
+    const editorAfterClick = await isEditorOpen();
+    check(
+      'T13',
+      '编辑中点击其他条目删除按钮，一次点击即生效（回归 #1）',
+      editingBeforeClick === true &&
+        equal(afterDeleteWhileEditing, ['甲（改）', '丙']) &&
+        editorAfterClick === false,
+      `点击前编辑框=${editingBeforeClick}，一次点击后列表=${JSON.stringify(
+        afterDeleteWhileEditing
+      )}，编辑框仍打开=${editorAfterClick}`
+    );
+
+    /* ---------- T14 输入法组合期间 Enter / Escape 不结束编辑 ---------- */
+    await dblclickTextAt(0);
+    await setEditorValue('甲（输入中）');
+    await evaluate(`(() => {
+      document.querySelector('.item__edit').dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    })()`);
+    const enterWhileComposing = await pressInEditor('Enter', true);
+    const stillOpenAfterEnter = await isEditorOpen();
+    const valueAfterEnter = await evaluate(
+      `document.querySelector('.item__edit') ? document.querySelector('.item__edit').value : null`
+    );
+    const escapeWhileComposing = await pressInEditor('Escape', true);
+    const stillOpenAfterEscape = await isEditorOpen();
+    const countDuringComposition = await evaluate(`document.querySelectorAll('.item').length`);
+    const inputUntouched = await evaluate(`document.getElementById('todo-input').value === ''`);
+    check(
+      'T14',
+      '输入法组合期间 Enter / Escape 不结束编辑、不误提交（回归 #2）',
+      enterWhileComposing.isComposing === true &&
+        stillOpenAfterEnter === true &&
+        valueAfterEnter === '甲（输入中）' &&
+        escapeWhileComposing.isComposing === true &&
+        stillOpenAfterEscape === true &&
+        countDuringComposition === 2 &&
+        inputUntouched === true,
+      `isComposing 已生效=${enterWhileComposing.isComposing}，Enter 后仍编辑=${stillOpenAfterEnter}，Escape 后仍编辑=${stillOpenAfterEscape}，条目数=${countDuringComposition}`
+    );
+
+    /* ---------- T15 候选词确认不结束编辑，之后的 Enter 才提交 ---------- */
+    // compositionend 与确认候选词的 Enter 发生在同一按键序列（同一任务）里
+    await evaluate(`(() => {
+      const editor = document.querySelector('.item__edit');
+      editor.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+      editor.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Enter', bubbles: true, cancelable: true, isComposing: false
+      }));
+    })()`);
+    await sleep(80);
+    const openAfterConfirmEnter = await isEditorOpen();
+    // 组合真正结束后，用户再按一次 Enter 才应提交
+    await sleep(120);
+    const enterAfterComposition = await pressInEditor('Enter', false);
+    await sleep(120);
+    const textAfterComposition = await texts();
+    const storedAfterComposition = await stored();
+    const editorAfterComposition = await isEditorOpen();
+    check(
+      'T15',
+      '确认候选词的 Enter 被忽略，随后按 Enter 正常提交',
+      openAfterConfirmEnter === true &&
+        enterAfterComposition.dispatched === true &&
+        editorAfterComposition === false &&
+        equal(textAfterComposition, ['甲（输入中）', '丙']) &&
+        storedAfterComposition.some((t) => t.text === '甲（输入中）'),
+      `确认 Enter 后仍编辑=${openAfterConfirmEnter}，再次 Enter 后列表=${JSON.stringify(
+        textAfterComposition
+      )}，存储=${JSON.stringify(storedAfterComposition.map((t) => t.text))}`
     );
   } finally {
     try {

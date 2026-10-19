@@ -51,7 +51,7 @@ node tests/verify.mjs
 EDGE_PATH="C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" node tests/verify.mjs
 ```
 
-脚本会启动本地静态服务器与无头浏览器，依次验证 12 个场景：
+脚本会启动本地静态服务器与无头浏览器，依次验证 15 个场景：
 
 | 编号 | 场景 | 验证内容 |
 | ---- | ---- | -------- |
@@ -67,8 +67,13 @@ EDGE_PATH="C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" node te
 | T10 | 行内编辑 | 双击编辑并保存，存储同步 |
 | T11 | 清除已完成 | 只移除已完成项 |
 | T12 | 清空 | 全部删除后回到空状态，存储为 `[]` |
+| T13 | 编辑中删除其他条目 | **回归**：编辑框 blur 时不重建列表，真实鼠标点击其他条目删除按钮一次即生效 |
+| T14 | 输入法组合期间按键 | **回归**：组合中 `Enter` / `Escape` 不结束编辑、不误提交 |
+| T15 | 候选词确认 | **回归**：确认候选词的 `Enter` 被忽略，之后按 `Enter` 才提交 |
 
-全部通过时输出 `结果：12/12 项通过` 并以退出码 `0` 结束。
+全部通过时输出 `结果：15/15 项通过` 并以退出码 `0` 结束。
+
+> T13–T15 为回归用例：在修复前的实现上运行，T13 会显示「乙未被删除」、T14 会显示「按 Enter 后编辑框已关闭」，可稳定复现对应缺陷。
 
 ### 手动验证清单
 
@@ -96,5 +101,7 @@ EDGE_PATH="C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" node te
 
 - **零依赖**：无框架、无构建步骤、无第三方库
 - **安全渲染**：用户输入通过 `textContent` 写入 DOM，避免 XSS
+- **输入法友好**：行内编辑框在输入法组合（`compositionstart` ~ `compositionend`）期间忽略 `Enter` / `Escape`，确认候选词不会误结束编辑
+- **最小重绘**：编辑提交只就地替换该行的文本节点，不重建列表，避免 blur 时把用户正在点击的按钮从 DOM 中移除
 - **容错**：`localStorage` 读写均做了异常捕获（隐私模式 / 存储被禁用时有提示），损坏的历史数据会被安全忽略
 - **存储格式**：`[{ id, text, done, createdAt }]`，文本上限 120 字符
