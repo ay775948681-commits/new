@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>待办清单 · Todo</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="app__header">
+      <h1 class="app__title">待办清单</h1>
+      <p class="app__subtitle">原生 HTML / CSS / JavaScript，数据保存在浏览器 localStorage 中</p>
+    </header>
+
+    <form class="composer" id="todo-form" autocomplete="off" novalidate>
+      <input
+        class="composer__input"
+        id="todo-input"
+        type="text"
+        maxlength="120"
+        placeholder="要做什么？按 Enter 或点「添加」"
+        aria-label="待办内容"
+      />
+      <button class="composer__submit" type="submit">添加</button>
+    </form>
+    <p class="composer__hint" id="form-hint" role="status" aria-live="polite"></p>
+
+    <section class="toolbar">
+      <div class="filters" role="group" aria-label="筛选待办">
+        <button class="filters__btn is-active" type="button" data-filter="all">全部</button>
+        <button class="filters__btn" type="button" data-filter="active">未完成</button>
+        <button class="filters__btn" type="button" data-filter="done">已完成</button>
+      </div>
+      <button class="toolbar__clear" id="clear-done" type="button">清除已完成</button>
+    </section>
+
+    <ul class="list" id="todo-list" aria-label="待办列表"></ul>
+
+    <p class="empty" id="empty-state" hidden>还没有待办，先添加一条吧。</p>
+
+    <footer class="app__footer">
+      <span id="summary">共 0 项</span>
+      <span class="app__hint">双击文字可编辑</span>
+    </footer>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
