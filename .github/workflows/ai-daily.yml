@@ -1,0 +1,32 @@
+name: AI Daily to WeChat
+on:
+  schedule:
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ai-daily-wechat
+  cancel-in-progress: false
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test feed handling
+        run: python -m unittest discover -s tests -p 'test_ai_daily.py' -v
+      - name: Generate and send
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+        run: python scripts/ai_daily.py --send
+      - name: Save generated report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-daily
+          path: daily.html
+          if-no-files-found: ignore
